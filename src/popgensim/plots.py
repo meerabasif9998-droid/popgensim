@@ -13,11 +13,15 @@ Conventions
 
 from __future__ import annotations
 
+# Matplotlib and Seaborn stubs leave plotting member signatures partially untyped.
+# pyright: reportUnknownMemberType=false
+
 from pathlib import Path
 from typing import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 import seaborn as sns
 from matplotlib.figure import Figure
 
@@ -36,12 +40,15 @@ def plot_trajectories(
     xlabel: str = "Generation",
 ) -> Figure:
     """Line plot of every allele's frequency over time (replicator ODE output)."""
-    t = np.asarray(t)
-    x = np.asarray(x)
-    if x.ndim != 2 or x.shape[0] != t.shape[0]:
+    t = np.asarray(t, dtype=float)
+    x = np.asarray(x, dtype=float)
+    if t.ndim != 1 or x.ndim != 2 or x.shape[0] != t.shape[0]:
         raise ValueError("x must have shape (len(t), n_alleles)")
 
     labels = list(labels) if labels is not None else _default_labels(x.shape[1])
+    if len(labels) != x.shape[1]:
+        raise ValueError("labels must have one entry per allele")
+
     fig, ax = plt.subplots(figsize=(8, 5))
     for i, lab in enumerate(labels):
         ax.plot(t, x[:, i], lw=2, label=lab)
@@ -57,24 +64,28 @@ def plot_solver_comparison(
     allele: int = 0,
     title: str = "Solver comparison",
 ) -> Figure:
-    """Overlay several solvers (e.g. Euler vs RK4) for one allele, plus
-    the absolute difference from the last solver in the dict (assumed reference)."""
-    t = np.asarray(t)
+    """Overlay solvers for one allele and plot their absolute differences."""
+    t = np.asarray(t, dtype=float)
     fig, (ax1, ax2) = plt.subplots(
         2, 1, figsize=(8, 7), sharex=True, gridspec_kw={"height_ratios": [3, 1.5]}
     )
-    for name, x in solutions.items():
-        ax1.plot(t, np.asarray(x)[:, allele], lw=2, label=name)
+    for name, solution in solutions.items():
+        ax1.plot(t, np.asarray(solution, dtype=float)[:, allele], lw=2, label=name)
     ax1.set(ylabel=f"Frequency (allele {allele + 1})", title=title)
     ax1.legend()
 
     names = list(solutions)
-    ref = np.asarray(solutions[names[-1]])[:, allele]
+    if not names:
+        raise ValueError("solutions must contain at least one solver")
+    reference_name = names[-1]
+    reference = np.asarray(solutions[reference_name], dtype=float)[:, allele]
     for name in names[:-1]:
-        err = np.abs(np.asarray(solutions[name])[:, allele] - ref)
-        ax2.semilogy(t, err + 1e-16, label=f"|{name} - {names[-1]}|")
+        solution = np.asarray(solutions[name], dtype=float)[:, allele]
+        error = np.abs(solution - reference)
+        ax2.semilogy(t, error + 1e-16, label=f"|{name} - {reference_name}|")
     ax2.set(xlabel="Generation", ylabel="Abs. difference")
-    ax2.legend()
+    if len(names) > 1:
+        ax2.legend()
     fig.tight_layout()
     return fig
 
@@ -86,23 +97,41 @@ def plot_drift_ensemble(
     max_paths: int = 50,
     title: str = "Wright-Fisher drift ensemble",
 ) -> Figure:
-    """Stochastic paths for one allele, optionally with a Monte Carlo CI band
-    and the deterministic ODE trajectory overlaid."""
-    runs = np.asarray(runs)
-    if runs.ndim != 2:
+    """Plot stochastic paths with an optional confidence band and ODE overlay."""
+    run_values: NDArray[np.float64] = np.asarray(runs, dtype=np.float64)
+    if run_values.ndim != 2:
         raise ValueError("runs must have shape (n_runs, n_generations + 1)")
-    gens = np.arange(runs.shape[1])
+    n_generations: int = run_values.shape[1]
+    generations: NDArray[np.int64] = np.arange(n_generations, dtype=np.int64)
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    for path in runs[:max_paths]:
-        ax.plot(gens, path, color="steelblue", alpha=0.2, lw=0.8)
+    for path in run_values[:max_paths]:
+        ax.plot(generations, path, color="steelblue", alpha=0.2, lw=0.8)
     if ci is not None:
-        lo, hi = ci
-        ax.fill_between(gens, lo, hi, color="orange", alpha=0.3, label="Monte Carlo CI")
-    ax.plot(gens, runs.mean(axis=0), color="black", lw=2, label="Ensemble mean")
+        lower: NDArray[np.float64] = np.asarray(ci[0], dtype=np.float64)
+        upper: NDArray[np.float64] = np.asarray(ci[1], dtype=np.float64)
+        ax.fill_between(
+            generations, lower, upper, color="orange", alpha=0.3, label="Monte Carlo CI"
+        )
+    ensemble_mean: NDArray[np.float64] = run_values.mean(axis=0)
+    ax.plot(generations, ensemble_mean, color="black", lw=2, label="Ensemble mean")
     if deterministic is not None:
-        ax.plot(gens, np.asarray(deterministic), "r--", lw=2, label="Deterministic")
-    ax.set(xlabel="Generation", ylabel="Allele frequency", title=title, ylim=(-0.02, 1.02))
+        deterministic_values: NDArray[np.float64] = np.asarray(
+            deterministic, dtype=np.float64
+        )
+        ax.plot(
+            generations,
+            deterministic_values,
+            "r--",
+            lw=2,
+            label="Deterministic",
+        )
+    ax.set(
+        xlabel="Generation",
+        ylabel="Allele frequency",
+        title=title,
+        ylim=(-0.02, 1.02),
+    )
     ax.legend()
     fig.tight_layout()
     return fig
@@ -113,26 +142,22 @@ def plot_fixation_histogram(
     bins: int = 30,
     title: str = "Final allele frequency distribution",
 ) -> Figure:
-    """Histogram of end-of-run frequencies (shows fixation / loss under drift)."""
+    """Histogram of end-of-run frequencies (shows fixation or loss under drift)."""
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    sns.histplot(np.asarray(final_freqs), bins=bins, binrange=(0, 1), ax=ax)
+    sns.histplot(np.asarray(final_freqs, dtype=float), bins=bins, binrange=(0, 1), ax=ax)
     ax.set(xlabel="Final frequency", ylabel="Count", title=title)
     fig.tight_layout()
     return fig
 
 
 def mean_fitness_grid(
-    p_values: np.ndarray, s_values: np.ndarray
-) -> np.ndarray:
-    """Mean fitness surface for a 2-allele haploid model.
-
-    Allele 1 has fitness 1, allele 2 has fitness 1 - s, so
-    w_bar(p, s) = p * 1 + (1 - p) * (1 - s).
-    Returns an array of shape (len(s_values), len(p_values)).
-    """
-    p = np.asarray(p_values)[None, :]
-    s = np.asarray(s_values)[:, None]
-    return p + (1 - p) * (1 - s)
+    p_values: ArrayLike, s_values: ArrayLike, h: float = 0.0
+) -> NDArray[np.float64]:
+    """Diploid mean fitness grid; genotype fitnesses are 1, 1-h*s, and 1-s."""
+    p = np.asarray(p_values, dtype=float)[None, :]
+    s = np.asarray(s_values, dtype=float)[:, None]
+    q = 1 - p
+    return p**2 + 2 * p * q * (1 - h * s) + q**2 * (1 - s)
 
 
 def plot_fitness_heatmap(
@@ -145,10 +170,12 @@ def plot_fitness_heatmap(
     cmap: str = "viridis",
     n_ticks: int = 6,
 ) -> Figure:
-    """Generic heatmap; ``values`` has shape (len(y_values), len(x_values))."""
-    values = np.asarray(values)
+    """Plot values as a heatmap with sparse x- and y-axis labels."""
+    values = np.asarray(values, dtype=float)
     if values.shape != (len(y_values), len(x_values)):
         raise ValueError("values must have shape (len(y_values), len(x_values))")
+    if n_ticks < 1:
+        raise ValueError("n_ticks must be at least 1")
 
     fig, ax = plt.subplots(figsize=(8, 6))
     sns.heatmap(
@@ -159,14 +186,13 @@ def plot_fitness_heatmap(
         xticklabels=False,
         yticklabels=False,
     )
-    # Readable sparse ticks instead of one label per cell.
-    xi = np.linspace(0, len(x_values) - 1, n_ticks).astype(int)
-    yi = np.linspace(0, len(y_values) - 1, n_ticks).astype(int)
-    ax.set_xticks(xi + 0.5)
-    ax.set_xticklabels([f"{x_values[i]:.2f}" for i in xi], rotation=0)
-    ax.set_yticks(yi + 0.5)
-    ax.set_yticklabels([f"{y_values[i]:.2f}" for i in yi], rotation=0)
-    ax.invert_yaxis()  # low s at the bottom
+    x_indices = np.linspace(0, len(x_values) - 1, min(n_ticks, len(x_values))).astype(int)
+    y_indices = np.linspace(0, len(y_values) - 1, min(n_ticks, len(y_values))).astype(int)
+    ax.set_xticks(x_indices + 0.5)
+    ax.set_xticklabels([f"{x_values[i]:.2f}" for i in x_indices], rotation=0)
+    ax.set_yticks(y_indices + 0.5)
+    ax.set_yticklabels([f"{y_values[i]:.2f}" for i in y_indices], rotation=0)
+    ax.invert_yaxis()
     ax.set(xlabel=xlabel, ylabel=ylabel, title=title)
     fig.tight_layout()
     return fig
@@ -179,16 +205,18 @@ def plot_hw_deviation(
     chi2: float | None = None,
     p_value: float | None = None,
 ) -> Figure:
-    """Observed vs. Hardy-Weinberg expected genotype counts."""
+    """Plot observed and Hardy-Weinberg expected genotype counts."""
     obs = np.asarray(genotype_obs, dtype=float)
     exp = np.asarray(genotype_exp, dtype=float)
-    idx = np.arange(len(labels))
-    w = 0.38
+    if obs.ndim != 1 or exp.ndim != 1 or len(obs) != len(labels) or len(exp) != len(labels):
+        raise ValueError("genotype counts must be 1D arrays matching the number of labels")
 
+    indices = np.arange(len(labels))
+    width = 0.38
     fig, ax = plt.subplots(figsize=(6.5, 4.5))
-    ax.bar(idx - w / 2, obs, w, label="Observed")
-    ax.bar(idx + w / 2, exp, w, label="HW expected")
-    ax.set_xticks(idx)
+    ax.bar(indices - width / 2, obs, width, label="Observed")
+    ax.bar(indices + width / 2, exp, width, label="HW expected")
+    ax.set_xticks(indices)
     ax.set_xticklabels(labels)
     ax.set(ylabel="Count")
     title = "Hardy-Weinberg: observed vs expected"
@@ -203,7 +231,7 @@ def plot_hw_deviation(
 def save_figure(
     fig: Figure, outdir: str | Path, name: str, dpi: int = 150, close: bool = True
 ) -> Path:
-    """Save to ``outdir/name.png`` (creating the directory) and return the path."""
+    """Save to ``outdir/name.png`` and return the path."""
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     path = outdir / f"{name}.png"
