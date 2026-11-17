@@ -14,10 +14,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import combinations_with_replacement
-from typing import Optional, Sequence
+
 
 import numpy as np
 import pandas as pd
+from numpy.typing import ArrayLike
 from scipy import stats as sps
 
 from .models import genotype_frequencies, infer_n_alleles
@@ -30,7 +31,7 @@ def _genotype_pairs(k: int) -> list[tuple[int, int]]:
 # --------------------------------------------------------------------------
 # Hardy-Weinberg
 # --------------------------------------------------------------------------
-def allele_frequencies_from_counts(counts: Sequence[float]) -> np.ndarray:
+def allele_frequencies_from_counts(counts: ArrayLike) -> np.ndarray:
     """Estimate allele frequencies from diploid genotype counts.
 
     Each homozygote ii contributes two copies of allele i; each heterozygote
@@ -62,7 +63,7 @@ class HWEResult:
         return self.p_value < alpha
 
 
-def hardy_weinberg_test(counts: Sequence[float]) -> HWEResult:
+def hardy_weinberg_test(counts: ArrayLike) -> HWEResult:
     """Chi-square goodness-of-fit test for Hardy-Weinberg proportions.
 
     Allele frequencies are estimated from the counts, which costs degrees of
@@ -86,7 +87,9 @@ def hardy_weinberg_test(counts: Sequence[float]) -> HWEResult:
 
     expected = total * genotype_frequencies(x)
     keep = expected > 0
-    chi2 = float(np.sum((obs[keep] - expected[keep]) ** 2 / expected[keep]))
+    chi2 = float(
+        np.sum((obs[keep] - expected[keep]) ** 2 / expected[keep], dtype=np.float64)
+    )
     dof = m * (m - 1) // 2
     p_value = float(sps.chi2.sf(chi2, dof))
 
@@ -161,14 +164,20 @@ class TrajectoryCI:
     def to_frame(self) -> pd.DataFrame:
         """Tidy long-format table: generation, allele, mean, median, lower, upper."""
         T, k = self.mean.shape
+        generation: list[int] = np.repeat(np.arange(T, dtype=int), k).tolist()
+        allele: list[int] = np.tile(np.arange(k, dtype=int), T).tolist()
+        mean: list[float] = self.mean.ravel().tolist()
+        median: list[float] = self.median.ravel().tolist()
+        lower: list[float] = self.lower.ravel().tolist()
+        upper: list[float] = self.upper.ravel().tolist()
         return pd.DataFrame(
             {
-                "generation": np.repeat(np.arange(T), k),
-                "allele": np.tile(np.arange(k), T),
-                "mean": self.mean.ravel(),
-                "median": self.median.ravel(),
-                "lower": self.lower.ravel(),
-                "upper": self.upper.ravel(),
+                "generation": generation,
+                "allele": allele,
+                "mean": mean,
+                "median": median,
+                "lower": lower,
+                "upper": upper,
             }
         )
 

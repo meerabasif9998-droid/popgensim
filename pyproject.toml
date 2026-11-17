@@ -26,3 +26,6 @@ sim-pop = "popgensim.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+[tool.pyright]
+typeCheckingMode = "basic"
+include = ["src", "tests"]
