@@ -41,12 +41,12 @@ def mutation_matrix(n_alleles: int, mu: float) -> np.ndarray:
 
 def check_mutation_matrix(M: np.ndarray, n_alleles: int) -> np.ndarray:
     """Validate that M is a (k, k) row-stochastic matrix."""
-    M = np.asarray(M, dtype=float)
-    if M.shape != (n_alleles, n_alleles):
+    matrix = np.asarray(M, dtype=float)
+    if matrix.shape != (n_alleles, n_alleles):
         raise ValueError(f"Mutation matrix must be {n_alleles}x{n_alleles}.")
-    if np.any(M < 0) or not np.allclose(M.sum(axis=1), 1.0):
+    if np.any(matrix < 0) or not np.allclose(matrix.sum(axis=1), 1.0):
         raise ValueError("Mutation matrix rows must be non-negative and sum to 1.")
-    return M
+    return matrix
 
 
 # --------------------------------------------------------------------------
@@ -107,10 +107,11 @@ def simulate(
     k = x.size
     if pop_size < 1 or generations < 0:
         raise ValueError("pop_size must be >= 1 and generations >= 0.")
-    if M is not None:
-        M = check_mutation_matrix(M, k)
+    mutation = M
+    if mutation is not None:
+        mutation = check_mutation_matrix(mutation, k)
     elif mu > 0:
-        M = mutation_matrix(k, mu)
+        mutation = mutation_matrix(k, mu)
 
     rng = seed if isinstance(seed, np.random.Generator) else np.random.default_rng(seed)
     n_copies = 2 * pop_size
@@ -118,7 +119,7 @@ def simulate(
     X = np.empty((generations + 1, k))
     X[0] = x
     for t in range(1, generations + 1):
-        x = wright_fisher_step(x, W, n_copies, rng, M)
+        x = wright_fisher_step(x, W, n_copies, rng, mutation)
         X[t] = x
     return X
 

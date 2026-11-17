@@ -18,7 +18,7 @@ from itertools import combinations_with_replacement
 
 import numpy as np
 import pandas as pd
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 from scipy import stats as sps
 
 from .models import genotype_frequencies, infer_n_alleles
@@ -131,15 +131,18 @@ def fitness_summary(X: np.ndarray, W: np.ndarray) -> pd.DataFrame:
     the fitness lost relative to the best genotype) and ``heterozygosity``
     (expected, 1 - sum x_i^2).
     """
-    X = np.asarray(X, dtype=float)
-    if X.ndim != 2 or X.shape[1] != W.shape[0]:
+    trajectories = np.asarray(X, dtype=float)
+    if trajectories.ndim != 2 or trajectories.shape[1] != W.shape[0]:
         raise ValueError("X must have shape (generations + 1, k) matching W.")
-    mean_w = np.einsum("ti,ij,tj->t", X, W, X)
-    df = pd.DataFrame(X, columns=[f"p{i}" for i in range(X.shape[1])])
-    df.insert(0, "generation", np.arange(X.shape[0]))
+    mean_w = np.einsum("ti,ij,tj->t", trajectories, W, trajectories)
+    df = pd.DataFrame(trajectories, columns=[f"p{i}" for i in range(trajectories.shape[1])])
+    generations: NDArray[np.int64] = np.arange(
+        trajectories.shape[0], dtype=np.int64
+    )
+    df.insert(0, "generation", generations)
     df["mean_fitness"] = mean_w
     df["genetic_load"] = 1.0 - mean_w / W.max()
-    df["heterozygosity"] = 1.0 - (X**2).sum(axis=1)
+    df["heterozygosity"] = 1.0 - (trajectories**2).sum(axis=1)
     return df
 
 
@@ -163,9 +166,17 @@ class TrajectoryCI:
 
     def to_frame(self) -> pd.DataFrame:
         """Tidy long-format table: generation, allele, mean, median, lower, upper."""
-        T, k = self.mean.shape
-        generation: list[int] = np.repeat(np.arange(T, dtype=int), k).tolist()
-        allele: list[int] = np.tile(np.arange(k, dtype=int), T).tolist()
+        n_generations, n_alleles = self.mean.shape
+        generation: list[int] = [
+            generation_index
+            for generation_index in range(n_generations)
+            for _ in range(n_alleles)
+        ]
+        allele: list[int] = [
+            allele_index
+            for _ in range(n_generations)
+            for allele_index in range(n_alleles)
+        ]
         mean: list[float] = self.mean.ravel().tolist()
         median: list[float] = self.median.ravel().tolist()
         lower: list[float] = self.lower.ravel().tolist()
@@ -184,18 +195,18 @@ class TrajectoryCI:
 
 def trajectory_ci(R: np.ndarray, level: float = 0.95) -> TrajectoryCI:
     """Monte Carlo percentile band from replicates of shape (reps, T+1, k)."""
-    R = np.asarray(R, dtype=float)
-    if R.ndim != 3:
+    replicates = np.asarray(R, dtype=float)
+    if replicates.ndim != 3:
         raise ValueError("R must have shape (n_reps, generations + 1, k).")
     if not 0.0 < level < 1.0:
         raise ValueError("level must be between 0 and 1.")
     tail = 100.0 * (1.0 - level) / 2.0
     return TrajectoryCI(
         level=level,
-        mean=R.mean(axis=0),
-        median=np.median(R, axis=0),
-        lower=np.percentile(R, tail, axis=0),
-        upper=np.percentile(R, 100.0 - tail, axis=0),
+        mean=replicates.mean(axis=0),
+        median=np.median(replicates, axis=0),
+        lower=np.percentile(replicates, tail, axis=0),
+        upper=np.percentile(replicates, 100.0 - tail, axis=0),
     )
 
 
@@ -226,15 +237,18 @@ def wilson_interval(successes: int, n: int, level: float = 0.95) -> ProportionEs
 
 
 def fixation_probability(
-    R: np.ndarray, allele: int = 0, threshold: float = 1.0, level: float = 0.95
+    R: np.ndarray,
+    allele: int = 0,
+    threshold: float = 1.0,
+    level: float = 0.95,
 ) -> ProportionEstimate:
     """Fraction of replicates in which ``allele`` is fixed by the final generation.
 
     "Fixed" means final frequency >= ``threshold``. With mutation, alleles
     never reach exactly 1, so pass something like ``threshold=0.99``.
     """
-    R = np.asarray(R, dtype=float)
-    if R.ndim != 3:
+    replicates = np.asarray(R, dtype=float)
+    if replicates.ndim != 3:
         raise ValueError("R must have shape (n_reps, generations + 1, k).")
-    fixed = int((R[:, -1, allele] >= threshold - 1e-12).sum())
-    return wilson_interval(fixed, R.shape[0], level)
+    fixed = int((replicates[:, -1, allele] >= threshold - 1e-12).sum())
+    return wilson_interval(fixed, replicates.shape[0], level)

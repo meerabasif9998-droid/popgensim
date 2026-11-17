@@ -28,7 +28,4 @@ sim-pop = "popgensim.cli:app"
 where = ["src"]
 [tool.pyright]
 typeCheckingMode = "basic"
-reportUnknownMemberType = false
-reportUnknownVariableType = false
-reportUnknownArgumentType = false
 include = ["src", "tests"]

@@ -8,17 +8,17 @@ from popgensim.plots import plot_trajectories
 
 
 @pytest.mark.parametrize("labels", [["A"], ["A", "B", "C"]])
-def test_plot_trajectories_requires_one_label_per_allele(labels):
+def test_plot_trajectories_requires_one_label_per_allele(labels: list[str]) -> None:
     with pytest.raises(ValueError, match="one entry per allele"):
         plot_trajectories(np.array([0, 1]), np.ones((2, 2)), labels=labels)
 
 
-def test_plot_trajectories_requires_one_dimensional_timepoints():
+def test_plot_trajectories_requires_one_dimensional_timepoints() -> None:
     with pytest.raises(ValueError, match=r"shape \(len\(t\), n_alleles\)"):
         plot_trajectories(np.array([[0, 1]]), np.ones((2, 2)))
 
 
-def test_plot_trajectories_plots_each_allele_with_its_label():
+def test_plot_trajectories_plots_each_allele_with_its_label() -> None:
     fig = plot_trajectories(
         np.array([0, 1]), np.ones((2, 2)), labels=["A", "B"]
     )
